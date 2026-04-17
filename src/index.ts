@@ -168,6 +168,10 @@ export class Synapse {
     return this.store.toJSON();
   }
 
+  getStore(): GraphStore {
+    return this.store;
+  }
+
   getDecayingRules(): string[] {
     return this.decay.decayingRuleIds();
   }

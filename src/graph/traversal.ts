@@ -1,8 +1,12 @@
-import type { GraphStore } from "./store.js";
-import type { EdgeType } from "./types.js";
+import type { EdgeType, GraphEdge } from "./types.js";
+
+export interface ReadableGraph {
+  getEdgesFrom(nodeId: string, type?: EdgeType): GraphEdge[];
+  getEdgesTo(nodeId: string, type?: EdgeType): GraphEdge[];
+}
 
 export function reachableFrom(
-  store: GraphStore,
+  store: ReadableGraph,
   startId: string,
   via: EdgeType[],
 ): Set<string> {
@@ -22,7 +26,7 @@ export function reachableFrom(
 }
 
 export function ancestorsVia(
-  store: GraphStore,
+  store: ReadableGraph,
   startId: string,
   via: EdgeType[],
 ): Set<string> {
@@ -42,7 +46,7 @@ export function ancestorsVia(
 }
 
 export function tracesToIntent(
-  store: GraphStore,
+  store: ReadableGraph,
   stepId: string,
   intentId: string,
 ): boolean {
