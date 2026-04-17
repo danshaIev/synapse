@@ -97,11 +97,48 @@ It **is**:
 
 ## Visualizer
 
-```bash
-npm run viz
+```ts
+import { Synapse } from "@danshaiev/synapse";
+import { startVisualizer } from "@danshaiev/synapse/visualizer";
+
+const synapse = await Synapse.fromProtocolFile("./synapse.protocol.yaml");
+startVisualizer(synapse.getStore(), {
+  port: 3000,
+  decayingRules: () => synapse.getDecayingRules(),
+});
 ```
 
-Opens `localhost:3000` with a live graph view of your agent's cognition. Color-coded: green = on-goal, yellow = applicable rule, red = blocked step.
+Opens `localhost:3000` with a live Cytoscape graph of your agent's cognition. Color-coded: coral = intent, amber = rule, cyan = step, green = observation. Click any node to inspect. Sidebar surfaces stats and decaying rules in real time.
+
+## Persistent storage (optional)
+
+Default store is in-memory. For persistence across sessions, swap in `SQLiteGraphStore` (uses Node's built-in `node:sqlite`, requires Node 22.5+):
+
+```ts
+import { SQLiteGraphStore } from "@danshaiev/synapse/graph";
+
+const store = new SQLiteGraphStore({ path: "./agent.db" });
+```
+
+## Step-level model router (optional)
+
+Route each step to the right model based on cost, scope preference, and capability strengths:
+
+```ts
+import { Router } from "@danshaiev/synapse/router";
+
+const router = new Router([
+  { id: "claude", label: "Claude 4.7", costPerKToken: 0.015, strengths: ["code", "long-context"], call: async (p) => /* ... */ },
+  { id: "gpt", label: "GPT-5", costPerKToken: 0.012, strengths: ["chat", "reasoning"], call: async (p) => /* ... */ },
+  { id: "haiku", label: "Claude Haiku 4.5", costPerKToken: 0.001, strengths: ["fast", "routing"], call: async (p) => /* ... */ },
+]);
+router.preferForScope("write_code", ["claude"]);
+
+const result = await router.call(
+  { scope: "write_code", promptTokens: 4000, budgetUsd: 0.10 },
+  context,
+);
+```
 
 ## Architecture
 
@@ -125,19 +162,20 @@ your agent loop
 
 ## Status
 
-**v0.1 — early.** Core flow works. API may shift. Use it. File issues. PRs welcome.
+**v0.1 — early but working.** Core flow ships. API may shift. Use it. File issues. PRs welcome.
 
 Roadmap:
 - [x] Protocol file format + parser
 - [x] Cognition graph (in-memory)
 - [x] Drift detection via reachability
 - [x] Adaptive rule re-injection
-- [x] Basic projector
-- [ ] LLMLingua-2 compression integration
-- [ ] SQLite persistent store
-- [ ] Visualizer (React + Cytoscape)
-- [ ] Step-level model router
+- [x] Projector with scope-aware context fragments
+- [x] SQLite persistent store (uses `node:sqlite`, no native deps)
+- [x] Cytoscape-based live visualizer with dark mode
+- [x] Step-level model router with cost/strength/scope routing
+- [ ] LLMLingua-2 compression integration (Python bridge)
 - [ ] LoRA adapter recipe (separate repo)
+- [ ] Hosted sidecar proxy mode
 
 ## License
 
