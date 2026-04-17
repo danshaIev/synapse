@@ -1,0 +1,37 @@
+{
+  "name": "@danshaiev/synapse",
+  "version": "0.1.0",
+  "description": "Cognition graph for LLM agents. Define rules, prevent drift, watch your agent think.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./protocol": "./dist/protocol/index.js",
+    "./graph": "./dist/graph/index.js"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test tests/*.test.js",
+    "example": "tsx examples/basic-agent.ts",
+    "viz": "tsx src/visualizer/server.ts"
+  },
+  "keywords": ["llm", "agent", "context", "drift", "cognition", "graph", "protocol"],
+  "author": "Dan Shalev <danshalev9@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danshaIev/synapse"
+  },
+  "dependencies": {
+    "yaml": "^2.6.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

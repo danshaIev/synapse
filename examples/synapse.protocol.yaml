@@ -1,0 +1,36 @@
+intent:
+  immutable: true
+  text: "Build a customer support agent that resolves billing issues"
+
+rules:
+  - id: no-promises
+    priority: HARD
+    scope: ["draft_response"]
+    predicate: "no `guarantee` usage"
+    on_violation: block_and_revise
+
+  - id: must-cite-policy
+    priority: HARD
+    scope: ["draft_response"]
+    predicate: "must include `policy:`"
+    on_violation: block_and_revise
+
+  - id: short-response
+    priority: SOFT
+    scope: ["draft_response"]
+    predicate: "must not exceed 800 chars"
+    on_violation: reinject_with_emphasis
+
+  - id: no-pii-leak
+    priority: HARD
+    scope: ["lookup_account", "draft_response"]
+    predicate: "no `ssn` usage"
+    on_violation: block_and_revise
+
+decomposition_patterns:
+  - intent: "resolve billing issue"
+    required_steps:
+      - "lookup_account"
+      - "diagnose_issue"
+      - "draft_response"
+      - "send_response"
