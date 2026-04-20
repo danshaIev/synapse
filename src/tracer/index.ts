@@ -1,11 +1,11 @@
-import type { GraphStore } from "../graph/store.js";
+import type { GraphStoreAPI } from "../graph/interface.js";
 import type { GraphNode } from "../graph/types.js";
 import type { EventListener, SynapseEvent } from "./events.js";
 
 export class Tracer {
   private listeners: EventListener[] = [];
 
-  constructor(private store: GraphStore) {}
+  constructor(private store: GraphStoreAPI) {}
 
   on(listener: EventListener): void {
     this.listeners.push(listener);
@@ -62,7 +62,9 @@ export class Tracer {
     const node = this.store.getNode(stepId);
     if (node) {
       node.metadata["blocked"] = true;
-      node.metadata["blockReason"] = metadata["blockReason"];
+      for (const [k, v] of Object.entries(metadata)) {
+        node.metadata[k] = v;
+      }
     }
     this.emit({
       type: "step.blocked",

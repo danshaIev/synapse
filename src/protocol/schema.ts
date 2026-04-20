@@ -17,7 +17,7 @@ export const RuleSchema = z.object({
   id: z.string().min(1),
   priority: PrioritySchema,
   scope: z.array(z.string()).min(1),
-  predicate: z.string().min(1),
+  predicate: z.union([z.string().min(1), z.function()]),
   on_violation: ViolationActionSchema,
 });
 

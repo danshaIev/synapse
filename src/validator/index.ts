@@ -1,4 +1,4 @@
-import type { GraphStore } from "../graph/store.js";
+import type { GraphStoreAPI } from "../graph/interface.js";
 import type { PredicateContext, Rule } from "../protocol/types.js";
 import { compilePredicate } from "./predicates.js";
 
@@ -18,18 +18,31 @@ export interface RuleViolation {
 
 export class Validator {
   private predicates = new Map<string, ReturnType<typeof compilePredicate>>();
+  private byScope = new Map<string, Rule[]>();
+  private allScopes: Set<string>;
 
   constructor(
     private rules: Rule[],
-    _store: GraphStore,
+    _store: GraphStoreAPI,
   ) {
+    this.allScopes = new Set();
     for (const rule of rules) {
       this.predicates.set(rule.id, compilePredicate(rule));
+      for (const scope of rule.scope) {
+        this.allScopes.add(scope);
+        const existing = this.byScope.get(scope);
+        if (existing) existing.push(rule);
+        else this.byScope.set(scope, [rule]);
+      }
     }
   }
 
+  knownScopes(): Set<string> {
+    return this.allScopes;
+  }
+
   async validate(ctx: PredicateContext): Promise<ValidationResult> {
-    const applicable = this.rules.filter((r) => r.scope.includes(ctx.scope));
+    const applicable = this.byScope.get(ctx.scope) ?? [];
     const blocking: RuleViolation[] = [];
     const soft: RuleViolation[] = [];
     const info: RuleViolation[] = [];
@@ -60,6 +73,6 @@ export class Validator {
   }
 
   applicableRulesFor(scope: string): Rule[] {
-    return this.rules.filter((r) => r.scope.includes(scope));
+    return this.byScope.get(scope) ?? [];
   }
 }

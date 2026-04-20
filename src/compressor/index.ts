@@ -11,16 +11,30 @@ export class IdentityCompressor implements Compressor {
 export class HeuristicCompressor implements Compressor {
   async compress(text: string, targetRatio = 0.5): Promise<string> {
     const lines = text.split("\n");
-    const filtered = lines.filter((line) => {
+    const scored = lines.map((line) => {
       const trimmed = line.trim();
-      if (trimmed.length === 0) return true;
-      if (trimmed.startsWith("#")) return true;
-      if (trimmed.startsWith("-")) return true;
-      const stopwordRatio = countStopwords(trimmed) / wordCount(trimmed);
-      return stopwordRatio < 0.6;
+      let score = 0.5;
+      if (trimmed.length === 0) score = 1;
+      else if (trimmed.startsWith("#")) score = 1;
+      else if (trimmed.startsWith("-")) score = 0.9;
+      else {
+        const ratio = countStopwords(trimmed) / wordCount(trimmed);
+        score = 1 - ratio;
+      }
+      return { line, score };
     });
-    if (filtered.length / lines.length <= targetRatio) return filtered.join("\n");
-    return filtered.join("\n");
+    const targetLines = Math.max(1, Math.ceil(lines.length * targetRatio));
+    const keep = new Set(
+      [...scored]
+        .map((s, i) => ({ ...s, i }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, targetLines)
+        .map((s) => s.i),
+    );
+    return scored
+      .map((s, i) => (keep.has(i) ? s.line : null))
+      .filter((s): s is string => s !== null)
+      .join("\n");
   }
 }
 

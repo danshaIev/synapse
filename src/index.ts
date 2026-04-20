@@ -1,4 +1,5 @@
 import { GraphStore } from "./graph/store.js";
+import type { GraphStoreAPI } from "./graph/interface.js";
 import { tracesToIntent } from "./graph/traversal.js";
 import { parseProtocolFile, parseProtocolObject } from "./protocol/parser.js";
 import type { Protocol } from "./protocol/types.js";
@@ -7,6 +8,7 @@ import { DecayTracker } from "./reinjector/index.js";
 import { Tracer } from "./tracer/index.js";
 import type { EventListener } from "./tracer/events.js";
 import { Validator, type ValidationResult } from "./validator/index.js";
+import { Analytics } from "./analytics/index.js";
 
 export interface StepInput<T> {
   scope: string;
@@ -24,6 +26,17 @@ export interface StepResult<T> {
   stepId: string;
 }
 
+export interface SynapseOptions {
+  throwOnBlock?: boolean;
+  store?: GraphStoreAPI;
+  /**
+   * When true, steps whose scope is not referenced by any rule are blocked
+   * as drift. Default false (matches v0.1 behavior). Opt-in to get a real
+   * drift signal instead of only catching orphaned parent chains.
+   */
+  strictScopes?: boolean;
+}
+
 export class StepBlockedError extends Error {
   constructor(
     public readonly result: ValidationResult,
@@ -39,21 +52,25 @@ export class StepBlockedError extends Error {
 }
 
 export class Synapse {
-  private store: GraphStore;
+  private store: GraphStoreAPI;
   private tracer: Tracer;
   private validator: Validator;
   private projector: Projector;
   private decay: DecayTracker;
+  private analytics: Analytics;
   private intentId: string;
   private throwOnBlock: boolean;
+  private strictScopes: boolean;
 
-  constructor(protocol: Protocol, options: { throwOnBlock?: boolean } = {}) {
-    this.store = new GraphStore();
+  constructor(protocol: Protocol, options: SynapseOptions = {}) {
+    this.store = options.store ?? new GraphStore();
     this.tracer = new Tracer(this.store);
     this.decay = new DecayTracker(protocol.rules);
     this.validator = new Validator(protocol.rules, this.store);
     this.projector = new Projector(this.store, protocol, this.decay);
+    this.analytics = new Analytics(this.store, protocol, this.decay);
     this.throwOnBlock = options.throwOnBlock ?? false;
+    this.strictScopes = options.strictScopes ?? false;
 
     const intent = this.store.addNode({
       type: "INTENT",
@@ -72,13 +89,16 @@ export class Synapse {
     }
   }
 
-  static async fromProtocolFile(path: string): Promise<Synapse> {
+  static async fromProtocolFile(
+    path: string,
+    options?: SynapseOptions,
+  ): Promise<Synapse> {
     const protocol = await parseProtocolFile(path);
-    return new Synapse(protocol);
+    return new Synapse(protocol, options);
   }
 
-  static fromObject(input: unknown): Synapse {
-    return new Synapse(parseProtocolObject(input));
+  static fromObject(input: unknown, options?: SynapseOptions): Synapse {
+    return new Synapse(parseProtocolObject(input), options);
   }
 
   on(listener: EventListener): void {
@@ -98,6 +118,14 @@ export class Synapse {
       metadata: input.metadata,
     });
 
+    if (
+      this.strictScopes &&
+      !this.validator.knownScopes().has(input.scope)
+    ) {
+      const reason = `Step scope "${input.scope}" is not referenced by any rule (drift detected).`;
+      return this.blockDrift(node.id, input.scope, input.description, reason);
+    }
+
     const validation = await this.validator.validate({
       scope: input.scope,
       description: input.description,
@@ -113,34 +141,29 @@ export class Synapse {
         validation.softViolations.some((v) => v.ruleId === rule.id) ||
         validation.infoViolations.some((v) => v.ruleId === rule.id);
       this.decay.recordEvaluation(rule.id, violated);
+      this.tracer.emit({
+        type: violated ? "rule.violated" : "rule.respected",
+        ruleId: rule.id,
+        stepId: node.id,
+        timestamp: Date.now(),
+      });
     }
 
     const linksToIntent = tracesToIntent(this.store, node.id, this.intentId);
     if (!linksToIntent) {
-      const reason = "Step does not trace back to original intent (drift detected).";
-      this.tracer.markStepBlocked(node.id, input.scope, input.description, {
-        blockReason: reason,
-      });
-      const blocked: ValidationResult = {
-        allowed: false,
-        blockingViolations: [
-          {
-            ruleId: "__drift__",
-            scope: input.scope,
-            message: reason,
-            action: "block_and_revise",
-          },
-        ],
-        softViolations: [],
-        infoViolations: [],
-      };
-      if (this.throwOnBlock) throw new StepBlockedError(blocked, node.id);
-      return { ok: false, blocked, stepId: node.id };
+      return this.blockDrift(
+        node.id,
+        input.scope,
+        input.description,
+        "Step does not trace back to original intent (drift detected).",
+      );
     }
 
     if (!validation.allowed) {
       this.tracer.markStepBlocked(node.id, input.scope, input.description, {
+        blockType: "rule",
         blockReason: validation.blockingViolations.map((v) => v.message).join("; "),
+        ruleIds: validation.blockingViolations.map((v) => v.ruleId),
       });
       if (this.throwOnBlock) throw new StepBlockedError(validation, node.id);
       return { ok: false, blocked: validation, stepId: node.id };
@@ -164,16 +187,47 @@ export class Synapse {
     }
   }
 
+  private blockDrift<T>(
+    stepId: string,
+    scope: string,
+    description: string,
+    reason: string,
+  ): StepResult<T> {
+    this.tracer.markStepBlocked(stepId, scope, description, {
+      blockType: "drift",
+      blockReason: reason,
+    });
+    const blocked: ValidationResult = {
+      allowed: false,
+      blockingViolations: [
+        {
+          ruleId: "__drift__",
+          scope,
+          message: reason,
+          action: "block_and_revise",
+        },
+      ],
+      softViolations: [],
+      infoViolations: [],
+    };
+    if (this.throwOnBlock) throw new StepBlockedError(blocked, stepId);
+    return { ok: false, blocked, stepId };
+  }
+
   getGraph() {
     return this.store.toJSON();
   }
 
-  getStore(): GraphStore {
+  getStore(): GraphStoreAPI {
     return this.store;
   }
 
   getDecayingRules(): string[] {
     return this.decay.decayingRuleIds();
+  }
+
+  getAnalytics(): Analytics {
+    return this.analytics;
   }
 
   getStats() {
@@ -189,3 +243,11 @@ export class Synapse {
 export { parseProtocolFile, parseProtocolObject } from "./protocol/parser.js";
 export type { Protocol, Rule } from "./protocol/types.js";
 export type { ValidationResult, RuleViolation } from "./validator/index.js";
+export type { GraphStoreAPI } from "./graph/interface.js";
+export { Analytics } from "./analytics/index.js";
+export type {
+  AnalyticsReport,
+  RuleMetrics,
+  StepOutcomes,
+  ScopeMetrics,
+} from "./analytics/index.js";

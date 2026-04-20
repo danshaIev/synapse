@@ -140,6 +140,31 @@ const result = await router.call(
 );
 ```
 
+## Analytics — is it actually helping?
+
+Every Synapse session records its own cognition graph, so you can ask it directly whether the protocol paid off:
+
+```ts
+const report = synapse.getAnalytics().report();
+// {
+//   steps:        { total, completed, blocked, failed, driftBlocks, ruleBlocks },
+//   rules:        [{ id, violations, evaluations, firstHalfRate, secondHalfRate,
+//                    trajectory, currentlyDecaying, dead }, ...],
+//   scopes:       [{ scope, steps, blocked, completed }, ...],
+//   driftBlockRate, ruleEnforcementRate, interventionsPerStep,
+//   reinjectionImpact, deadRuleCount,
+// }
+
+console.log(synapse.getAnalytics().summary());
+```
+
+Key signals:
+- **`driftBlockRate`** — drift-blocked steps / total. This is the raw "stopped the agent from wandering" number.
+- **`ruleEnforcementRate`** — `1 - violations/evaluations` across all rules. How often the agent is in-policy.
+- **`reinjectionImpact`** — average Δ (first-half violation rate − second-half) across rules with history. Positive = reinjection is recovering decaying rules. Negative = decay is winning.
+- **`rules[].trajectory`** — `improving` / `worsening` / `stable` per rule. Spot which specific rules are decaying even with reinjection.
+- **`deadRuleCount`** — rules that never fired. Dead weight in your protocol.
+
 ## Architecture
 
 ```
@@ -173,6 +198,7 @@ Roadmap:
 - [x] SQLite persistent store (uses `node:sqlite`, no native deps)
 - [x] Cytoscape-based live visualizer with dark mode
 - [x] Step-level model router with cost/strength/scope routing
+- [x] Session analytics (drift rate, rule trajectory, reinjection impact)
 - [ ] LLMLingua-2 compression integration (Python bridge)
 - [ ] LoRA adapter recipe (separate repo)
 - [ ] Hosted sidecar proxy mode

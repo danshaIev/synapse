@@ -4,12 +4,14 @@ export interface RuleStats {
   evaluations: number;
   violations: number;
   recentViolations: number[];
+  history: number[];
 }
 
 export class DecayTracker {
   private stats = new Map<string, RuleStats>();
   private readonly windowSize = 10;
   private readonly decayThreshold = 0.3;
+  private readonly historyCap = 500;
 
   constructor(rules: Rule[]) {
     for (const rule of rules) {
@@ -17,6 +19,7 @@ export class DecayTracker {
         evaluations: 0,
         violations: 0,
         recentViolations: [],
+        history: [],
       });
     }
   }
@@ -26,7 +29,10 @@ export class DecayTracker {
     if (!stat) return;
     stat.evaluations += 1;
     if (violated) stat.violations += 1;
-    stat.recentViolations.push(violated ? 1 : 0);
+    const bit = violated ? 1 : 0;
+    stat.history.push(bit);
+    if (stat.history.length > this.historyCap) stat.history.shift();
+    stat.recentViolations.push(bit);
     if (stat.recentViolations.length > this.windowSize) {
       stat.recentViolations.shift();
     }

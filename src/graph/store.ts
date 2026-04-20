@@ -61,7 +61,9 @@ export class GraphStore {
   }
 
   getNodesByType(type: NodeType): GraphNode[] {
-    return [...this.nodes.values()].filter((n) => n.type === type);
+    return [...this.nodes.values()]
+      .filter((n) => n.type === type)
+      .sort((a, b) => a.createdAt - b.createdAt);
   }
 
   getEdgesFrom(nodeId: string, type?: EdgeType): GraphEdge[] {

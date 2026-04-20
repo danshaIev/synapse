@@ -10,6 +10,7 @@
     "./protocol": "./dist/protocol/index.js",
     "./graph": "./dist/graph/index.js",
     "./router": "./dist/router/index.js",
+    "./analytics": "./dist/analytics/index.js",
     "./visualizer": "./dist/visualizer/server.js"
   },
   "files": ["dist", "README.md", "LICENSE"],

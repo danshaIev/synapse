@@ -1,4 +1,4 @@
-import type { GraphStore } from "../graph/store.js";
+import type { GraphStoreAPI } from "../graph/interface.js";
 import type { GraphNode } from "../graph/types.js";
 import type { Protocol, Rule } from "../protocol/types.js";
 import type { DecayTracker } from "../reinjector/index.js";
@@ -26,7 +26,7 @@ interface ProjectedRule {
 
 export class Projector {
   constructor(
-    private store: GraphStore,
+    private store: GraphStoreAPI,
     private protocol: Protocol,
     private decay: DecayTracker,
   ) {}
@@ -57,8 +57,17 @@ export class Projector {
           }`,
       );
 
+    const scopedStepIds = new Set(
+      this.store
+        .getNodesByType("STEP")
+        .filter((n) => n.scope === input.scope)
+        .map((n) => n.id),
+    );
     const recentObservations = this.store
       .getNodesByType("OBSERVATION")
+      .filter((obs) =>
+        this.store.getEdgesTo(obs.id, "RETURNS").some((e) => scopedStepIds.has(e.from)),
+      )
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, recentLimit)
       .map((n) => `[${n.id}] ${truncate(n.content, 200)}`);
