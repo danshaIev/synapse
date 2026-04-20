@@ -24,21 +24,60 @@ Synapse turns your agent's reasoning into a live **cognition graph** and treats 
 - **Adaptive re-injection** — when a rule starts decaying, the projector boosts it in the next context fragment automatically
 - **Visualizer** — Obsidian-style live graph view of your agent's reasoning at `localhost:3000`
 
-## Quickstart
+## Quickstart — one line
 
 ```ts
-import { Synapse } from '@danshaiev/synapse';
+import { enhance } from '@danshaiev/synapse';
 
-const synapse = await Synapse.fromProtocolFile('./synapse.protocol.yaml');
+const smart = enhance(yourLLM, { goal: "build a landing page" });
 
-const result = await synapse.step({
-  scope: 'write_code',
-  description: 'Add user authentication',
-  action: async () => callYourLLM(synapse.projectContext()),
+const answer = await smart("add a hero section");
+```
+
+That's it. `enhance()` wraps any `(prompt) => Promise<string>` LLM function. Synapse now:
+- injects a protocol-aware context in front of every prompt
+- validates every response against bundled default rules (non-empty output, no AI-slop phrases, length caps)
+- auto-retries with rule-violation feedback baked into the context
+- tracks analytics you can inspect at any point: `smart.synapse.getAnalytics().summary()`
+
+No YAML file, no scope taxonomy, no ceremony. Bring a goal and an LLM function.
+
+### Adding custom rules
+
+```ts
+const smart = enhance(yourLLM, {
+  defaults: {
+    goal: "Answer customer questions about our API",
+    requirePhrases: ["[docs]"],         // every response must cite docs
+    avoidPhrases: ["guarantee", "refund"], // policy-sensitive terms
+    maxOutputChars: 2000,
+  },
 });
 ```
 
-That's it. Synapse intercepts the step, validates against your protocol rules, blocks if violated, otherwise records it in the cognition graph and updates the projection for the next call.
+### Power-user API (explicit steps + protocol file)
+
+```ts
+import { Synapse } from '@danshaiev/synapse';
+const synapse = await Synapse.fromProtocolFile('./synapse.protocol.yaml');
+
+// step() validates the PLAN pre-execution (blocks before the LLM call)
+const r1 = await synapse.step({
+  scope: 'write_code',
+  description: 'Add user authentication',
+  action: async (ctx) => callYourLLM(ctx),
+});
+
+// run() validates the OUTPUT post-execution and auto-retries on violations
+const r2 = await synapse.run({
+  scope: 'write_code',
+  description: 'Fix the auth bug',
+  maxRetries: 2,
+  call: (ctx) => callYourLLM(ctx),
+});
+```
+
+Use `step()` when you can pre-declare the content being validated; use `run()` (or `enhance()`) when you want Synapse to supervise the LLM output itself.
 
 ## Protocol file
 
@@ -199,6 +238,8 @@ Roadmap:
 - [x] Cytoscape-based live visualizer with dark mode
 - [x] Step-level model router with cost/strength/scope routing
 - [x] Session analytics (drift rate, rule trajectory, reinjection impact)
+- [x] Drop-in `enhance()` wrapper + bundled default protocol (zero-config integration)
+- [x] Post-execution validation + auto-retry with violation feedback (`synapse.run()`)
 - [ ] LLMLingua-2 compression integration (Python bridge)
 - [ ] LoRA adapter recipe (separate repo)
 - [ ] Hosted sidecar proxy mode

@@ -29,7 +29,7 @@ export class Validator {
     for (const rule of rules) {
       this.predicates.set(rule.id, compilePredicate(rule));
       for (const scope of rule.scope) {
-        this.allScopes.add(scope);
+        if (scope !== "*") this.allScopes.add(scope);
         const existing = this.byScope.get(scope);
         if (existing) existing.push(rule);
         else this.byScope.set(scope, [rule]);
@@ -41,8 +41,14 @@ export class Validator {
     return this.allScopes;
   }
 
+  private applicable(scope: string): Rule[] {
+    const scoped = this.byScope.get(scope) ?? [];
+    const wildcard = this.byScope.get("*") ?? [];
+    return scoped.concat(wildcard);
+  }
+
   async validate(ctx: PredicateContext): Promise<ValidationResult> {
-    const applicable = this.byScope.get(ctx.scope) ?? [];
+    const applicable = this.applicable(ctx.scope);
     const blocking: RuleViolation[] = [];
     const soft: RuleViolation[] = [];
     const info: RuleViolation[] = [];
@@ -73,6 +79,6 @@ export class Validator {
   }
 
   applicableRulesFor(scope: string): Rule[] {
-    return this.byScope.get(scope) ?? [];
+    return this.applicable(scope);
   }
 }

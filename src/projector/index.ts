@@ -35,7 +35,7 @@ export class Projector {
     const recentLimit = input.recentLimit ?? 5;
 
     const applicableRules = this.protocol.rules
-      .filter((r) => r.scope.includes(input.scope))
+      .filter((r) => r.scope.includes(input.scope) || r.scope.includes("*"))
       .map((r) => this.projectRule(r));
 
     const allSteps = this.store

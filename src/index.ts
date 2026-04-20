@@ -9,6 +9,7 @@ import { Tracer } from "./tracer/index.js";
 import type { EventListener } from "./tracer/events.js";
 import { Validator, type ValidationResult } from "./validator/index.js";
 import { Analytics } from "./analytics/index.js";
+import { defaultProtocol, type DefaultProtocolOptions } from "./defaults.js";
 
 export interface StepInput<T> {
   scope: string;
@@ -101,6 +102,18 @@ export class Synapse {
     return new Synapse(parseProtocolObject(input), options);
   }
 
+  /**
+   * Zero-config Synapse with a bundled default protocol. The only thing
+   * you must provide is the goal. Pass `defaults.extraRules` to layer on
+   * custom rules without writing a YAML file.
+   */
+  static withDefaults(
+    defaults: DefaultProtocolOptions,
+    options?: SynapseOptions,
+  ): Synapse {
+    return new Synapse(defaultProtocol(defaults), options);
+  }
+
   on(listener: EventListener): void {
     this.tracer.on(listener);
   }
@@ -187,6 +200,124 @@ export class Synapse {
     }
   }
 
+  /**
+   * High-level drop-in runner. Unlike `step()` which validates the plan
+   * before acting, `run()` validates the action's *output* and automatically
+   * retries with rule-violation feedback injected into context.
+   *
+   * Use this when you want Synapse to supervise an LLM call end-to-end:
+   *   const { value } = await synapse.run({
+   *     scope: 'respond',
+   *     description: 'answer user question',
+   *     call: (ctx) => llm(ctx + userPrompt),
+   *   });
+   */
+  async run(input: {
+    scope?: string;
+    description: string;
+    parentSubGoalId?: string;
+    metadata?: Record<string, unknown>;
+    call: (context: string) => Promise<string>;
+    maxRetries?: number;
+  }): Promise<{
+    ok: boolean;
+    value: string;
+    retries: number;
+    stepId: string;
+    blocked?: ValidationResult;
+  }> {
+    const scope = input.scope ?? "default";
+    const maxRetries = input.maxRetries ?? 2;
+
+    const node = this.tracer.recordStep({
+      scope,
+      description: input.description,
+      parentSubGoalId: input.parentSubGoalId,
+      intentId: this.intentId,
+      metadata: input.metadata,
+    });
+
+    if (this.strictScopes && !this.validator.knownScopes().has(scope)) {
+      const blocked = this.blockDrift<string>(
+        node.id,
+        scope,
+        input.description,
+        `Step scope "${scope}" is not referenced by any rule (drift detected).`,
+      );
+      return { ok: false, value: "", retries: 0, stepId: node.id, blocked: blocked.blocked };
+    }
+
+    let lastValue = "";
+    let lastValidation: ValidationResult | undefined;
+    let attempt = 0;
+    let feedback = "";
+
+    while (attempt <= maxRetries) {
+      const baseCtx = this.projector.toContextString({ scope });
+      const ctx = feedback ? `${baseCtx}\n\n# RETRY FEEDBACK\n${feedback}` : baseCtx;
+      try {
+        lastValue = await input.call(ctx);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        this.tracer.markStepFailed(node.id, scope, input.description, reason);
+        return { ok: false, value: "", retries: attempt, stepId: node.id };
+      }
+
+      const validation = await this.validator.validate({
+        scope,
+        description: input.description,
+        content: lastValue,
+        metadata: input.metadata,
+      });
+      lastValidation = validation;
+
+      for (const rule of this.validator.applicableRulesFor(scope)) {
+        const violated =
+          validation.blockingViolations.some((v) => v.ruleId === rule.id) ||
+          validation.softViolations.some((v) => v.ruleId === rule.id) ||
+          validation.infoViolations.some((v) => v.ruleId === rule.id);
+        this.decay.recordEvaluation(rule.id, violated);
+        this.tracer.emit({
+          type: violated ? "rule.violated" : "rule.respected",
+          ruleId: rule.id,
+          stepId: node.id,
+          timestamp: Date.now(),
+        });
+      }
+
+      if (validation.allowed) {
+        this.tracer.markStepAllowed(node.id, scope, input.description);
+        this.tracer.recordObservation({
+          fromStepId: node.id,
+          content: lastValue,
+        });
+        this.tracer.markStepCompleted(node.id, scope, input.description);
+        return { ok: true, value: lastValue, retries: attempt, stepId: node.id };
+      }
+
+      if (attempt === maxRetries) break;
+      feedback = buildRetryFeedback(validation);
+      attempt += 1;
+    }
+
+    this.tracer.markStepBlocked(node.id, scope, input.description, {
+      blockType: "rule",
+      blockReason: lastValidation?.blockingViolations.map((v) => v.message).join("; "),
+      ruleIds: lastValidation?.blockingViolations.map((v) => v.ruleId),
+      retriesExhausted: true,
+    });
+    if (this.throwOnBlock && lastValidation) {
+      throw new StepBlockedError(lastValidation, node.id);
+    }
+    return {
+      ok: false,
+      value: lastValue,
+      retries: attempt,
+      stepId: node.id,
+      blocked: lastValidation,
+    };
+  }
+
   private blockDrift<T>(
     stepId: string,
     scope: string,
@@ -240,7 +371,24 @@ export class Synapse {
   }
 }
 
+function buildRetryFeedback(v: ValidationResult): string {
+  const lines = [
+    "Your previous output violated protocol rules. Fix these before retrying:",
+  ];
+  for (const violation of v.blockingViolations) {
+    lines.push(`  ✗ [HARD] ${violation.ruleId}: ${violation.message}`);
+  }
+  for (const violation of v.softViolations) {
+    lines.push(`  ⚠ [SOFT] ${violation.ruleId}: ${violation.message}`);
+  }
+  return lines.join("\n");
+}
+
 export { parseProtocolFile, parseProtocolObject } from "./protocol/parser.js";
+export { defaultProtocol } from "./defaults.js";
+export type { DefaultProtocolOptions } from "./defaults.js";
+export { enhance } from "./enhance.js";
+export type { EnhanceOptions, EnhancedLLM } from "./enhance.js";
 export type { Protocol, Rule } from "./protocol/types.js";
 export type { ValidationResult, RuleViolation } from "./validator/index.js";
 export type { GraphStoreAPI } from "./graph/interface.js";

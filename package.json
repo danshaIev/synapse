@@ -11,6 +11,8 @@
     "./graph": "./dist/graph/index.js",
     "./router": "./dist/router/index.js",
     "./analytics": "./dist/analytics/index.js",
+    "./enhance": "./dist/enhance.js",
+    "./defaults": "./dist/defaults.js",
     "./visualizer": "./dist/visualizer/server.js"
   },
   "files": ["dist", "README.md", "LICENSE"],
